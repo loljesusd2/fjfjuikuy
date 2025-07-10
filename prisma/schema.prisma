@@ -1,0 +1,310 @@
+
+generator client {
+    provider = "prisma-client-js"
+    binaryTargets = ["native", "linux-musl-arm64-openssl-3.0.x"]
+    output = "/home/ubuntu/beauty-go-mvp/app/node_modules/.prisma/client"
+}
+
+datasource db {
+    provider = "postgresql"
+    url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  name      String
+  phone     String?
+  avatar    String?
+  role      UserRole @default(CLIENT)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Verification system
+  verificationStatus VerificationStatus @default(UNVERIFIED)
+  verificationDocuments String[] // Array of document URLs
+  verificationNotes String?
+  verifiedAt DateTime?
+
+  // Client specific fields
+  clientProfile ClientProfile?
+
+  // Professional specific fields
+  professionalProfile ProfessionalProfile?
+
+  // Relations
+  bookingsAsClient      Booking[] @relation("ClientBookings")
+  bookingsAsProfessional Booking[] @relation("ProfessionalBookings")
+  reviewsGiven          Review[]  @relation("ReviewsGiven")
+  reviewsReceived       Review[]  @relation("ReviewsReceived")
+  payments              Payment[]
+  notifications         Notification[]
+  verificationRequests  VerificationRequest[]
+  favorites             Favorite[]
+  favoritedBy           Favorite[] @relation("FavoriteProfessionals")
+
+  @@map("users")
+}
+
+model ClientProfile {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  address    String?
+  city       String?
+  state      String?
+  zipCode    String?
+  
+  preferences String[] // Array of preferred service types
+
+  @@map("client_profiles")
+}
+
+model ProfessionalProfile {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  businessName String
+  bio          String?
+  address      String
+  city         String
+  state        String
+  zipCode      String
+  
+  mobileProfessional Boolean @default(true) // Offers mobile services
+  hasStudio Boolean @default(false) // Has a physical studio
+  
+  // Business details
+  yearsExperience Int?
+  certifications  String[]
+  portfolio       String[] // Array of image URLs
+  
+  // Availability
+  workingHours Json // { monday: { start: "09:00", end: "17:00", available: true }, ... }
+  
+  // Stats
+  totalEarnings   Float   @default(0)
+  averageRating   Float   @default(0)
+  totalReviews    Int     @default(0)
+  isVerified      Boolean @default(false)
+  isActive        Boolean @default(true)
+
+  // Relations
+  services Service[]
+
+  @@map("professional_profiles")
+}
+
+model Service {
+  id             String @id @default(cuid())
+  professionalId String
+  professional   ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+
+  name        String
+  description String
+  category    ServiceCategory
+  price       Float
+  duration    Int // in minutes
+  images      String[] // Array of image URLs
+  isActive    Boolean @default(true)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  bookings Booking[]
+
+  @@map("services")
+}
+
+model Booking {
+  id             String @id @default(cuid())
+  clientId       String
+  professionalId String
+  serviceId      String
+  
+  client       User    @relation("ClientBookings", fields: [clientId], references: [id])
+  professional User    @relation("ProfessionalBookings", fields: [professionalId], references: [id])
+  service      Service @relation(fields: [serviceId], references: [id])
+
+  // Booking details
+  scheduledDate DateTime
+  scheduledTime String // "14:30"
+  status        BookingStatus @default(PENDING)
+  totalAmount   Float
+  notes         String?
+  
+  // Location (manual address input)
+  address   String
+  city      String
+  state     String
+  zipCode   String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  payment Payment?
+  review  Review?
+
+  @@map("bookings")
+}
+
+model Payment {
+  id        String @id @default(cuid())
+  bookingId String @unique
+  userId    String
+  
+  user    User    @relation(fields: [userId], references: [id])
+  booking Booking @relation(fields: [bookingId], references: [id])
+
+  amount            Float
+  platformFee       Float // 20% commission
+  professionalAmount Float
+  paymentMethod     PaymentMethod @default(CASH)
+  status            PaymentStatus @default(PENDING)
+  
+  transactionId String @unique @default(cuid())
+
+  // Refund information
+  refundAmount Float?
+  refundReason String?
+  refundedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("payments")
+}
+
+
+
+model Review {
+  id        String @id @default(cuid())
+  bookingId String @unique
+  reviewerId String
+  revieweeId String
+  
+  booking  Booking @relation(fields: [bookingId], references: [id])
+  reviewer User    @relation("ReviewsGiven", fields: [reviewerId], references: [id])
+  reviewee User    @relation("ReviewsReceived", fields: [revieweeId], references: [id])
+
+  rating    Int // 1-5 stars
+  comment   String?
+  images    String[] // Optional photos
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("reviews")
+}
+
+model Notification {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  title   String
+  message String
+  type    NotificationType
+  isRead  Boolean @default(false)
+  data    Json? // Additional data for the notification
+
+  createdAt DateTime @default(now())
+
+  @@map("notifications")
+}
+
+model VerificationRequest {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  documentType    String // "id", "license", "certification"
+  documentUrl     String
+  documentName    String
+  status          VerificationStatus @default(PENDING)
+  adminNotes      String?
+  reviewedBy      String? // Admin user ID
+  reviewedAt      DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("verification_requests")
+}
+
+
+
+model Favorite {
+  id             String @id @default(cuid())
+  userId         String
+  professionalId String
+  
+  user         User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  professional User @relation("FavoriteProfessionals", fields: [professionalId], references: [id], onDelete: Cascade)
+  
+  createdAt DateTime @default(now())
+  
+  @@unique([userId, professionalId])
+  @@map("favorites")
+}
+
+// Enums
+enum UserRole {
+  CLIENT
+  PROFESSIONAL
+  ADMIN
+}
+
+enum ServiceCategory {
+  HAIR_STYLING
+  MANICURE
+  PEDICURE
+  MAKEUP
+  SKINCARE
+  EYEBROWS
+  MASSAGE
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum PaymentStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  CASH
+}
+
+enum NotificationType {
+  BOOKING_REQUEST
+  BOOKING_CONFIRMED
+  BOOKING_CANCELLED
+  PAYMENT_RECEIVED
+  REVIEW_RECEIVED
+  VERIFICATION_APPROVED
+  VERIFICATION_REJECTED
+  GENERAL
+}
+
+enum VerificationStatus {
+  UNVERIFIED
+  PENDING
+  APPROVED
+  REJECTED
+}
